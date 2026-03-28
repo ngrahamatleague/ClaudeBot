@@ -16,6 +16,9 @@ public class ZillowSearchGui extends JFrame {
     private JTextField keywordField;
     private JComboBox<String> typeCombo;
     private JButton searchButton;
+    private JButton prevButton;
+    private JButton nextButton;
+    private JLabel pageLabel;
     private JTable resultsTable;
     private DefaultTableModel tableModel;
     private JLabel statusLabel;
@@ -26,6 +29,10 @@ public class ZillowSearchGui extends JFrame {
     };
 
     private List<Property> currentProperties;
+    private int currentPage = 1;
+    private int totalPages = 1;
+    private String lastKeyword = "";
+    private String lastType = "forSale";
 
     public ZillowSearchGui() {
         this.apiClient = new ZillowApiClient();
@@ -70,13 +77,43 @@ public class ZillowSearchGui extends JFrame {
         searchButton.setFocusPainted(false);
         searchButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
+        prevButton = new JButton("< Prev");
+        prevButton.setForeground(Color.WHITE);
+        prevButton.setBackground(new Color(60, 90, 130));
+        prevButton.setFocusPainted(false);
+        prevButton.setEnabled(false);
+
+        nextButton = new JButton("Next >");
+        nextButton.setForeground(Color.WHITE);
+        nextButton.setBackground(new Color(60, 90, 130));
+        nextButton.setFocusPainted(false);
+        nextButton.setEnabled(false);
+
+        pageLabel = new JLabel("Page 1 of 1");
+        pageLabel.setForeground(Color.WHITE);
+        pageLabel.setFont(new Font("SansSerif", Font.PLAIN, 12));
+
         progressBar = new JProgressBar();
         progressBar.setIndeterminate(false);
         progressBar.setVisible(false);
         progressBar.setPreferredSize(new Dimension(100, 20));
 
-        searchButton.addActionListener(e -> performSearch());
-        keywordField.addActionListener(e -> performSearch());
+        searchButton.addActionListener(e -> {
+            currentPage = 1;
+            performSearch();
+        });
+        keywordField.addActionListener(e -> {
+            currentPage = 1;
+            performSearch();
+        });
+        prevButton.addActionListener(e -> {
+            currentPage--;
+            fetchPage();
+        });
+        nextButton.addActionListener(e -> {
+            currentPage++;
+            fetchPage();
+        });
 
         panel.add(titleLabel);
         panel.add(Box.createHorizontalStrut(20));
@@ -85,6 +122,10 @@ public class ZillowSearchGui extends JFrame {
         panel.add(typeLabel);
         panel.add(typeCombo);
         panel.add(searchButton);
+        panel.add(Box.createHorizontalStrut(10));
+        panel.add(prevButton);
+        panel.add(pageLabel);
+        panel.add(nextButton);
         panel.add(progressBar);
 
         return panel;
@@ -106,14 +147,7 @@ public class ZillowSearchGui extends JFrame {
         resultsTable.setFillsViewportHeight(true);
         resultsTable.setGridColor(new Color(220, 220, 220));
 
-        // Right-align numeric columns
-        DefaultTableCellRenderer rightAlign = new DefaultTableCellRenderer();
-        rightAlign.setHorizontalAlignment(SwingConstants.RIGHT);
-        for (int col : new int[]{3, 4, 5, 6, 8}) {
-            resultsTable.getColumnModel().getColumn(col).setCellRenderer(rightAlign);
-        }
-
-        // Alternate row colors
+        // Alternate row colors with right-aligned numeric columns
         resultsTable.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
             @Override
             public Component getTableCellRendererComponent(JTable table, Object value,
@@ -122,9 +156,7 @@ public class ZillowSearchGui extends JFrame {
                 if (!isSelected) {
                     c.setBackground(row % 2 == 0 ? Color.WHITE : new Color(245, 248, 255));
                 }
-                if (column == 3) {
-                    setHorizontalAlignment(SwingConstants.RIGHT);
-                } else if (column == 4 || column == 5 || column == 6 || column == 8) {
+                if (column == 3 || column == 4 || column == 5 || column == 6 || column == 8) {
                     setHorizontalAlignment(SwingConstants.RIGHT);
                 } else {
                     setHorizontalAlignment(SwingConstants.LEFT);
@@ -173,32 +205,45 @@ public class ZillowSearchGui extends JFrame {
             JOptionPane.showMessageDialog(this, "Please enter a search keyword.", "Missing Input", JOptionPane.WARNING_MESSAGE);
             return;
         }
+        lastKeyword = keyword;
+        lastType = (String) typeCombo.getSelectedItem();
+        fetchPage();
+    }
 
-        String type = (String) typeCombo.getSelectedItem();
-
-        searchButton.setEnabled(false);
+    private void fetchPage() {
+        setControlsEnabled(false);
         progressBar.setVisible(true);
         progressBar.setIndeterminate(true);
         statusLabel.setText("Searching...");
         tableModel.setRowCount(0);
 
+        final int pageToFetch = currentPage;
+        final String keyword = lastKeyword;
+        final String type = lastType;
+
         SwingWorker<ZillowApiClient.SearchResult, Void> worker = new SwingWorker<>() {
             @Override
             protected ZillowApiClient.SearchResult doInBackground() throws Exception {
-                return apiClient.search(keyword, type);
+                return apiClient.search(keyword, type, pageToFetch);
             }
 
             @Override
             protected void done() {
-                searchButton.setEnabled(true);
+                setControlsEnabled(true);
                 progressBar.setIndeterminate(false);
                 progressBar.setVisible(false);
                 try {
                     ZillowApiClient.SearchResult result = get();
+                    currentPage = result.getCurrentPage();
+                    totalPages = result.getTotalPages();
                     currentProperties = result.getProperties();
                     populateTable(currentProperties);
-                    statusLabel.setText(String.format("Showing %d of %d total results for \"%s\"",
-                            currentProperties.size(), result.getTotalResults(), keyword));
+                    pageLabel.setText("Page " + currentPage + " of " + totalPages);
+                    prevButton.setEnabled(currentPage > 1);
+                    nextButton.setEnabled(currentPage < totalPages);
+                    statusLabel.setText(String.format(
+                        "Page %d of %d  |  Showing %d properties  |  %,d total results for \"%s\"",
+                        currentPage, totalPages, currentProperties.size(), result.getTotalResults(), keyword));
                 } catch (Exception ex) {
                     statusLabel.setText("Error: " + ex.getMessage());
                     JOptionPane.showMessageDialog(ZillowSearchGui.this,
@@ -208,6 +253,14 @@ public class ZillowSearchGui extends JFrame {
         };
 
         worker.execute();
+    }
+
+    private void setControlsEnabled(boolean enabled) {
+        searchButton.setEnabled(enabled);
+        keywordField.setEnabled(enabled);
+        typeCombo.setEnabled(enabled);
+        prevButton.setEnabled(enabled && currentPage > 1);
+        nextButton.setEnabled(enabled && currentPage < totalPages);
     }
 
     private void populateTable(List<Property> properties) {
@@ -230,9 +283,8 @@ public class ZillowSearchGui extends JFrame {
 
     private String formatHomeType(String type) {
         if (type == null) return "";
-        return type.replace("_", " ").toLowerCase()
-                   .substring(0, 1).toUpperCase()
-                + type.replace("_", " ").toLowerCase().substring(1);
+        String lower = type.replace("_", " ").toLowerCase();
+        return lower.substring(0, 1).toUpperCase() + lower.substring(1);
     }
 
     private String formatStatus(String status) {

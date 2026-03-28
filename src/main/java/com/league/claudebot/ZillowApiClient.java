@@ -26,9 +26,9 @@ public class ZillowApiClient {
         this.mapper = new ObjectMapper();
     }
 
-    public SearchResult search(String keyword, String type) throws IOException, InterruptedException {
+    public SearchResult search(String keyword, String type, int page) throws IOException, InterruptedException {
         String encodedKeyword = URLEncoder.encode(keyword, StandardCharsets.UTF_8);
-        String url = API_URL + "?keyword=" + encodedKeyword + "&type=" + type;
+        String url = API_URL + "?keyword=" + encodedKeyword + "&type=" + type + "&page=" + page;
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
@@ -55,6 +55,18 @@ public class ZillowApiClient {
             totalResults = searchInfo.path("totalResults").asInt(0);
         }
 
+        int currentPage = 1;
+        int totalPages = 1;
+        JsonNode pagination = root.path("pagination");
+        if (!pagination.isMissingNode()) {
+            currentPage = pagination.path("currentPage").asInt(1);
+            JsonNode otherPages = pagination.path("otherPages");
+            if (otherPages.isObject()) {
+                totalPages = otherPages.size();
+                if (totalPages == 0) totalPages = 1;
+            }
+        }
+
         List<Property> properties = new ArrayList<>();
         JsonNode propertiesNode = root.path("properties");
         if (propertiesNode.isArray()) {
@@ -66,7 +78,7 @@ public class ZillowApiClient {
             }
         }
 
-        return new SearchResult(totalResults, properties);
+        return new SearchResult(totalResults, currentPage, totalPages, properties);
     }
 
     private Property parseProperty(JsonNode node) {
@@ -96,14 +108,20 @@ public class ZillowApiClient {
 
     public static class SearchResult {
         private final int totalResults;
+        private final int currentPage;
+        private final int totalPages;
         private final List<Property> properties;
 
-        public SearchResult(int totalResults, List<Property> properties) {
+        public SearchResult(int totalResults, int currentPage, int totalPages, List<Property> properties) {
             this.totalResults = totalResults;
+            this.currentPage = currentPage;
+            this.totalPages = totalPages;
             this.properties = properties;
         }
 
         public int getTotalResults() { return totalResults; }
+        public int getCurrentPage() { return currentPage; }
+        public int getTotalPages() { return totalPages; }
         public List<Property> getProperties() { return properties; }
     }
 }
